@@ -64,12 +64,14 @@
 
     .preview-container {
       flex: 1;
+      min-height: 0; /* kunci: biarkan flex shrink, jangan overflow */
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 16px;
+      padding: 12px 16px;
       background: #0f0f23;
       position: relative;
+      overflow: hidden;
     }
 
     video {
@@ -92,6 +94,7 @@
     .placeholder svg { opacity: 0.3; }
 
     .settings-panel {
+      flex-shrink: 0; /* jangan pernah terpotong */
       padding: 16px 20px;
       background: #16213e;
       border-top: 1px solid #0f3460;
@@ -137,6 +140,7 @@
     select:hover { border-color: #533483; }
 
     .controls {
+      flex-shrink: 0; /* selalu tampil, tidak terpotong */
       display: flex;
       gap: 10px;
       justify-content: center;
@@ -185,6 +189,7 @@
     .btn-stop:hover:not(:disabled) { background: #5a6578; transform: scale(1.02); }
 
     .shortcuts-hint {
+      flex-shrink: 0;
       text-align: center;
       padding: 6px;
       font-size: 11px;

@@ -11,12 +11,13 @@
   "main": "dist/main/index.js",
   "scripts": {
     "start": "bun run build && electron .",
-    "build": "bun build src/main/index.ts --outfile=dist/main/index.js --target=node --external electron && bun build src/preload/index.ts --outfile=dist/preload/index.cjs --target=node --external electron --format=cjs && bun build src/renderer/index.ts --outfile=dist/renderer/index.js --target=browser && cp src/renderer/index.html dist/renderer/index.html",
+    "build": "bun build src/main/index.ts --outfile=dist/main/index.js --target=node --external electron --external ffmpeg-static && bun build src/preload/index.ts --outfile=dist/preload/index.cjs --target=node --external electron --format=cjs && bun build src/renderer/index.ts --outfile=dist/renderer/index.js --target=browser && cp src/renderer/index.html dist/renderer/index.html",
     "dist": "bun run build && electron-builder"
   },
   "build": {
     "appId": "com.geekdev.recorder",
     "productName": "Screen Recorder",
+    "icon": "assets/icon.png",
     "publish": {
       "provider": "github",
       "owner": "setiawanboedy",
@@ -24,27 +25,37 @@
     },
     "files": [
       "dist/**/*",
+      "assets/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/**"
     ],
     "directories": {
       "output": "release"
     },
     "linux": {
       "target": ["deb", "AppImage"],
+      "icon": "assets/icon.png",
       "category": "AudioVideo"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/icon.ico"
     }
   },
   "private": true,
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/fluent-ffmpeg": "^2.1.28",
     "@types/node": "^25.5.0",
     "electron": "^41.0.2",
     "electron-builder": "^26.8.1"
   },
   "peerDependencies": {
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0"
   }
 }

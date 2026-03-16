@@ -213,9 +213,17 @@ async function startRecording() {
       const blob = new Blob(recordedChunks, { type: mimeType });
       const buffer = await blob.arrayBuffer();
 
-      const result = await window.electronAPI.saveRecording(buffer, `recording-${Date.now()}.webm`);
+      // Show converting status
+      setStatus('idle');
+      statusBadge.className = 'status-badge status-paused';
+      statusBadge.textContent = 'CONVERTING…';
+
+      const result = await window.electronAPI.saveRecording(buffer, `recording-${Date.now()}.mp4`);
       if (result.filePath) {
         console.log('[renderer] Saved to', result.filePath);
+        if ('warning' in result && result.warning) {
+          alert(`Saved (as WebM fallback):\n${result.filePath}\n\n⚠️ ${result.warning}`);
+        }
       }
 
       recordedChunks = [];
