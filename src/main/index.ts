@@ -2,10 +2,7 @@ import { app, BrowserWindow, ipcMain, desktopCapturer, dialog, Tray, Menu, globa
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
+import { spawn } from 'child_process';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ffmpegStaticPath: string = require('ffmpeg-static');
@@ -219,55 +216,80 @@ ipcMain.handle('set-source', (_event, sourceId: string) => {
   console.log('[main] Selected source:', sourceId);
 });
 
-// IPC: Save recorded video — convert WebM → MP4 via ffmpeg
-ipcMain.handle('save-recording', async (_event, { buffer, filename }) => {
+// IPC: Save recorded video — convert WebM → MP4 via ffmpeg with live progress
+ipcMain.handle('save-recording', async (event, { buffer, filename, durationSeconds = 0 }) => {
   const videosDir = path.join(app.getPath('videos'), 'Screen Recorder');
-  if (!fs.existsSync(videosDir)) {
-    fs.mkdirSync(videosDir, { recursive: true });
-  }
+  if (!fs.existsSync(videosDir)) fs.mkdirSync(videosDir, { recursive: true });
 
-  const mp4Filename = (filename as string).replace(/\.webm$/, '.mp4');
+  const saveFilename = filename as string;
+  const isMP4 = saveFilename.endsWith('.mp4');
+
   const { filePath } = await dialog.showSaveDialog({
     buttonLabel: 'Save video',
-    defaultPath: path.join(videosDir, mp4Filename),
-    filters: [
-      { name: 'MP4 Video', extensions: ['mp4'] },
-      { name: 'WebM Video', extensions: ['webm'] },
-    ],
+    defaultPath: path.join(videosDir, saveFilename),
+    filters: isMP4
+      ? [{ name: 'MP4 Video', extensions: ['mp4'] }, { name: 'WebM Video', extensions: ['webm'] }]
+      : [{ name: 'WebM Video', extensions: ['webm'] }, { name: 'MP4 Video', extensions: ['mp4'] }],
   });
 
   if (!filePath) return { canceled: true };
 
-  // Write input as temp .webm
   const tempWebm = path.join(os.tmpdir(), `rec-tmp-${Date.now()}.webm`);
   fs.writeFileSync(tempWebm, Buffer.from(buffer as ArrayBuffer));
 
-  const isWebmOutput = filePath.endsWith('.webm');
-
-  if (isWebmOutput) {
-    // No conversion needed
+  if (filePath.endsWith('.webm')) {
     fs.renameSync(tempWebm, filePath);
     return { success: true, filePath };
   }
 
-  // Convert to MP4 with ffmpeg
+  // MP4 conversion — stream progress via IPC
   try {
-    const ffmpeg = getFfmpegPath();
-    await execFileAsync(ffmpeg, [
-      '-i', tempWebm,
-      '-c:v', 'libx264',
-      '-preset', 'fast',
-      '-crf', '22',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-movflags', '+faststart',
-      '-y', filePath,
-    ]);
+    const ffmpegBin = getFfmpegPath();
+    const totalSecs = durationSeconds as number;
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(ffmpegBin, [
+        '-i', tempWebm,
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '22',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-progress', 'pipe:1',
+        '-nostats',
+        '-y', filePath,
+      ]);
+
+      let buf = '';
+      proc.stdout?.on('data', (chunk: Buffer) => {
+        buf += chunk.toString();
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.startsWith('out_time=')) continue;
+          const timeStr = line.substring('out_time='.length).trim();
+          if (timeStr === 'N/A') continue;
+
+          const parts = timeStr.split(':');
+          const outSecs = parseFloat(parts[0] ?? '0') * 3600
+            + parseFloat(parts[1] ?? '0') * 60
+            + parseFloat(parts[2] ?? '0');
+
+          const percent = totalSecs > 0
+            ? Math.min(99, Math.round((outSecs / totalSecs) * 100))
+            : -1;
+
+          event.sender.send('conversion-progress', { percent, currentSecs: Math.round(outSecs), totalSecs });
+        }
+      });
+
+      proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`)));
+      proc.on('error', reject);
+    });
+
     console.log('[main] Converted to MP4:', filePath);
     return { success: true, filePath };
   } catch (err) {
-    // Fallback: save as .webm if conversion fails
-    console.error('[main] ffmpeg conversion failed, saving as webm:', err);
+    console.error('[main] ffmpeg conversion failed:', err);
     const fallbackPath = filePath.replace(/\.mp4$/, '.webm');
     fs.copyFileSync(tempWebm, fallbackPath);
     return { success: true, filePath: fallbackPath, warning: 'MP4 conversion failed, saved as WebM' };

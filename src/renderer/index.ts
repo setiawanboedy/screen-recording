@@ -3,13 +3,14 @@ declare global {
     electronAPI: {
       getSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
       setSource: (sourceId: string) => Promise<void>;
-      saveRecording: (buffer: ArrayBuffer, filename: string) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; warning?: string }>;
+      saveRecording: (buffer: ArrayBuffer, filename: string, durationSeconds: number) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; warning?: string }>;
       setRecordingStatus: (status: string) => void;
       onToggleRecording: (callback: () => void) => void;
       onTogglePause: (callback: () => void) => void;
       showFloatingToolbar: () => void;
       hideFloatingToolbar: () => void;
       syncToolbar: (timer: string, state: 'recording' | 'paused') => void;
+      onConversionProgress: (cb: (data: { percent: number; currentSecs: number; totalSecs: number }) => void) => void;
     };
   }
 }
@@ -25,6 +26,14 @@ const micSelect = document.getElementById('micSelect') as HTMLSelectElement;
 const formatSelect = document.getElementById('formatSelect') as HTMLSelectElement;
 const timerEl = document.getElementById('timer') as HTMLDivElement;
 const statusBadge = document.getElementById('statusBadge') as HTMLSpanElement;
+
+// Conversion overlay elements
+const conversionOverlay = document.getElementById('conversionOverlay') as HTMLDivElement;
+const progressFill = document.getElementById('progressFill') as HTMLDivElement;
+const progressPercent = document.getElementById('progressPercent') as HTMLSpanElement;
+const progressTime = document.getElementById('progressTime') as HTMLSpanElement;
+const convTitle = document.getElementById('convTitle') as HTMLDivElement;
+const convSub = document.getElementById('convSub') as HTMLDivElement;
 
 // State
 let mediaRecorder: MediaRecorder | null = null;
@@ -42,6 +51,53 @@ function formatTime(totalSeconds: number): string {
   const s = (totalSeconds % 60).toString().padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
+
+function formatShort(secs: number): string {
+  const m = Math.floor(secs / 60).toString().padStart(2, '0');
+  const s = Math.floor(secs % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+// Conversion overlay
+function showConversionOverlay() {
+  convTitle.textContent = 'Converting to MP4';
+  convSub.textContent = 'Please wait…';
+  progressFill.style.width = '0%';
+  progressFill.classList.add('indeterminate');
+  progressPercent.textContent = '…';
+  progressTime.textContent = '';
+  conversionOverlay.classList.add('visible');
+}
+
+function updateConversionProgress(percent: number, currentSecs: number, totalSecs: number) {
+  if (percent < 0) {
+    progressFill.classList.add('indeterminate');
+    progressPercent.textContent = '…';
+    progressTime.textContent = formatShort(currentSecs);
+  } else {
+    progressFill.classList.remove('indeterminate');
+    progressFill.style.width = `${percent}%`;
+    progressPercent.textContent = `${percent}%`;
+    convSub.textContent = `Processing…`;
+    progressTime.textContent = totalSecs > 0
+      ? `${formatShort(currentSecs)} / ${formatShort(totalSecs)}`
+      : formatShort(currentSecs);
+  }
+}
+
+async function hideConversionOverlay() {
+  progressFill.classList.remove('indeterminate');
+  progressFill.style.width = '100%';
+  progressPercent.textContent = '100%';
+  convSub.textContent = '✓ Done!';
+  await new Promise(r => setTimeout(r, 700));
+  conversionOverlay.classList.remove('visible');
+}
+
+// Listen to conversion progress events from main process
+window.electronAPI.onConversionProgress(({ percent, currentSecs, totalSecs }) => {
+  updateConversionProgress(percent, currentSecs, totalSecs);
+});
 
 function startTimer() {
   elapsedSeconds = 0;
@@ -220,18 +276,18 @@ async function startRecording() {
       const buffer = await blob.arrayBuffer();
 
       const fmt = formatSelect.value as 'mp4' | 'webm';
+      const duration = elapsedSeconds;
 
-      // Show converting status only for MP4 (needs ffmpeg)
       setStatus('idle');
-      if (fmt === 'mp4') {
-        statusBadge.className = 'status-badge status-paused';
-        statusBadge.textContent = 'CONVERTING…';
-      }
+      if (fmt === 'mp4') showConversionOverlay();
 
-      const result = await window.electronAPI.saveRecording(buffer, `recording-${Date.now()}.${fmt}`);
+      const result = await window.electronAPI.saveRecording(buffer, `recording-${Date.now()}.${fmt}`, duration);
+
+      if (fmt === 'mp4') await hideConversionOverlay();
+
       if (result.filePath) {
         console.log('[renderer] Saved to', result.filePath);
-        if ('warning' in result && result.warning) {
+        if (result.warning) {
           alert(`Saved (as WebM fallback):\n${result.filePath}\n\n⚠️ ${result.warning}`);
         }
       }
