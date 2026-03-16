@@ -11,6 +11,7 @@ declare global {
       hideFloatingToolbar: () => void;
       syncToolbar: (timer: string, state: 'recording' | 'paused') => void;
       onConversionProgress: (cb: (data: { percent: number; currentSecs: number; totalSecs: number }) => void) => void;
+      onConversionStart: (cb: () => void) => void;
     };
   }
 }
@@ -94,7 +95,8 @@ async function hideConversionOverlay() {
   conversionOverlay.classList.remove('visible');
 }
 
-// Listen to conversion progress events from main process
+// Listen to conversion events from main process
+window.electronAPI.onConversionStart(() => showConversionOverlay());
 window.electronAPI.onConversionProgress(({ percent, currentSecs, totalSecs }) => {
   updateConversionProgress(percent, currentSecs, totalSecs);
 });
@@ -274,14 +276,23 @@ async function startRecording() {
       console.log('[renderer] Recording stopped, chunks:', recordedChunks.length);
       const blob = new Blob(recordedChunks, { type: mimeType });
       const buffer = await blob.arrayBuffer();
+      recordedChunks = [];
 
       const fmt = formatSelect.value as 'mp4' | 'webm';
       const duration = elapsedSeconds;
 
+      // ── Reset UI immediately — don't wait for save/convert ──
+      isRecording = false;
+      isPaused = false;
+      cleanupStreams();
+      stopTimer();
       setStatus('idle');
-      if (fmt === 'mp4') showConversionOverlay();
+      updateButtons('idle');
 
-      const result = await window.electronAPI.saveRecording(buffer, `recording-${Date.now()}.${fmt}`, duration);
+      // ── Async save + conversion (overlay triggered by conversion-start event) ──
+      const result = await window.electronAPI.saveRecording(
+        buffer, `recording-${Date.now()}.${fmt}`, duration
+      );
 
       if (fmt === 'mp4') await hideConversionOverlay();
 
@@ -291,14 +302,6 @@ async function startRecording() {
           alert(`Saved (as WebM fallback):\n${result.filePath}\n\n⚠️ ${result.warning}`);
         }
       }
-
-      recordedChunks = [];
-      cleanupStreams();
-      stopTimer();
-      setStatus('idle');
-      updateButtons('idle');
-      isRecording = false;
-      isPaused = false;
     };
 
     mediaRecorder.start(1000);

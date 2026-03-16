@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   syncToolbar: (timer: string, state: 'recording' | 'paused') =>
     ipcRenderer.send('toolbar-sync', { timer, state }),
   // Conversion progress
+  onConversionStart: (cb: () => void) =>
+    ipcRenderer.on('conversion-start', cb),
   onConversionProgress: (cb: (data: { percent: number; currentSecs: number; totalSecs: number }) => void) =>
     ipcRenderer.on('conversion-progress', (_event, data) => cb(data)),
 });

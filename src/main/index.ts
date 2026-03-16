@@ -238,9 +238,13 @@ ipcMain.handle('save-recording', async (event, { buffer, filename, durationSecon
   fs.writeFileSync(tempWebm, Buffer.from(buffer as ArrayBuffer));
 
   if (filePath.endsWith('.webm')) {
-    fs.renameSync(tempWebm, filePath);
+    fs.copyFileSync(tempWebm, filePath);
+    fs.unlinkSync(tempWebm);
     return { success: true, filePath };
   }
+
+  // Signal renderer to show overlay NOW (after dialog closed, before conversion)
+  event.sender.send('conversion-start');
 
   // MP4 conversion — stream progress via IPC
   try {
