@@ -3,15 +3,18 @@ declare global {
     electronAPI: {
       getSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
       setSource: (sourceId: string) => Promise<void>;
-      saveRecording: (buffer: ArrayBuffer, filename: string, durationSeconds: number) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; warning?: string }>;
+      initRecording: () => Promise<void>;
+      sendChunk: (buf: ArrayBuffer) => void;
+      saveRecording: (filename: string, durationSeconds: number) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; warning?: string; error?: string }>;
+      cancelRecording: () => void;
       setRecordingStatus: (status: string) => void;
       onToggleRecording: (callback: () => void) => void;
       onTogglePause: (callback: () => void) => void;
       showFloatingToolbar: () => void;
       hideFloatingToolbar: () => void;
       syncToolbar: (timer: string, state: 'recording' | 'paused') => void;
-      onConversionProgress: (cb: (data: { percent: number; currentSecs: number; totalSecs: number }) => void) => void;
       onConversionStart: (cb: () => void) => void;
+      onConversionProgress: (cb: (data: { percent: number; currentSecs: number; totalSecs: number }) => void) => void;
     };
   }
 }
@@ -38,7 +41,7 @@ const convSub = document.getElementById('convSub') as HTMLDivElement;
 
 // State
 let mediaRecorder: MediaRecorder | null = null;
-let recordedChunks: Blob[] = [];
+let pendingChunks: Promise<void>[] = []; // track in-flight arrayBuffer() conversions
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let elapsedSeconds = 0;
 let isPaused = false;
@@ -266,22 +269,27 @@ async function startRecording() {
       : 'video/webm';
 
     mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
-    recordedChunks = [];
+    pendingChunks = [];
 
+    // Stream each chunk directly to main process — no in-memory buffering
     mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) recordedChunks.push(e.data);
+      if (e.data.size > 0) {
+        const p = e.data.arrayBuffer().then(buf => window.electronAPI.sendChunk(buf));
+        pendingChunks.push(p);
+      }
     };
 
     mediaRecorder.onstop = async () => {
-      console.log('[renderer] Recording stopped, chunks:', recordedChunks.length);
-      const blob = new Blob(recordedChunks, { type: mimeType });
-      const buffer = await blob.arrayBuffer();
-      recordedChunks = [];
+      console.log('[renderer] MediaRecorder stopped, flushing pending chunks...');
+
+      // Wait for all in-flight arrayBuffer() conversions to complete and be sent
+      await Promise.all(pendingChunks);
+      pendingChunks = [];
 
       const fmt = formatSelect.value as 'mp4' | 'webm';
       const duration = elapsedSeconds;
 
-      // ── Reset UI immediately — don't wait for save/convert ──
+      // ── Reset UI immediately ──
       isRecording = false;
       isPaused = false;
       cleanupStreams();
@@ -289,9 +297,9 @@ async function startRecording() {
       setStatus('idle');
       updateButtons('idle');
 
-      // ── Async save + conversion (overlay triggered by conversion-start event) ──
+      // ── Save (dialog + optional conversion) ──
       const result = await window.electronAPI.saveRecording(
-        buffer, `recording-${Date.now()}.${fmt}`, duration
+        `recording-${Date.now()}.${fmt}`, duration
       );
 
       if (fmt === 'mp4') await hideConversionOverlay();
@@ -304,6 +312,8 @@ async function startRecording() {
       }
     };
 
+    // Init streaming session in main process, then start recorder
+    await window.electronAPI.initRecording();
     mediaRecorder.start(1000);
     isRecording = true;
     isPaused = false;
@@ -312,10 +322,11 @@ async function startRecording() {
     updateButtons('recording');
     window.electronAPI.showFloatingToolbar();
     window.electronAPI.syncToolbar('00:00:00', 'recording');
-    console.log('[renderer] Recording started!');
+    console.log('[renderer] Recording started (streaming to disk)!');
 
   } catch (err) {
     console.error('[renderer] startRecording error:', err);
+    window.electronAPI.cancelRecording();
     alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
     cleanupStreams();
   }

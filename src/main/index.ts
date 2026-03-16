@@ -20,6 +20,10 @@ let tray: Tray | null = null;
 let selectedSourceId: string | null = null;
 let recordingState: 'idle' | 'recording' | 'paused' = 'idle';
 
+// Streaming recording state
+let recordingStream: ReturnType<typeof fs.createWriteStream> | null = null;
+let recordingTempPath: string | null = null;
+
 const appRoot = () => app.getAppPath();
 
 const getIconPath = () => {
@@ -216,44 +220,72 @@ ipcMain.handle('set-source', (_event, sourceId: string) => {
   console.log('[main] Selected source:', sourceId);
 });
 
-// IPC: Save recorded video — convert WebM → MP4 via ffmpeg with live progress
-ipcMain.handle('save-recording', async (event, { buffer, filename, durationSeconds = 0 }) => {
+// IPC: Open a write stream for streaming chunks during recording
+ipcMain.handle('recording-init', () => {
+  if (recordingStream) {
+    recordingStream.destroy();
+    if (recordingTempPath && fs.existsSync(recordingTempPath)) fs.unlinkSync(recordingTempPath);
+  }
+  recordingTempPath = path.join(os.tmpdir(), `rec-${Date.now()}.webm`);
+  recordingStream = fs.createWriteStream(recordingTempPath);
+  console.log('[main] Recording stream opened:', recordingTempPath);
+});
+
+// IPC: Stream each chunk directly to temp file (fire-and-forget, ordered by IPC)
+ipcMain.on('recording-chunk', (_event, data: Buffer) => {
+  if (recordingStream && !recordingStream.destroyed) {
+    recordingStream.write(Buffer.from(data));
+  }
+});
+
+// IPC: Close stream, show save dialog, convert if needed
+ipcMain.handle('recording-save', async (event, { filename, durationSeconds = 0 }) => {
+  // Close write stream first
+  await new Promise<void>((resolve) => {
+    if (!recordingStream || recordingStream.destroyed) return resolve();
+    recordingStream.end(() => resolve());
+  });
+  recordingStream = null;
+
+  const tempPath = recordingTempPath;
+  recordingTempPath = null;
+
+  if (!tempPath || !fs.existsSync(tempPath)) {
+    return { error: 'No recording data found' };
+  }
+
   const videosDir = path.join(app.getPath('videos'), 'Screen Recorder');
   if (!fs.existsSync(videosDir)) fs.mkdirSync(videosDir, { recursive: true });
 
-  const saveFilename = filename as string;
-  const isMP4 = saveFilename.endsWith('.mp4');
-
+  const isMP4 = (filename as string).endsWith('.mp4');
   const { filePath } = await dialog.showSaveDialog({
     buttonLabel: 'Save video',
-    defaultPath: path.join(videosDir, saveFilename),
+    defaultPath: path.join(videosDir, filename as string),
     filters: isMP4
       ? [{ name: 'MP4 Video', extensions: ['mp4'] }, { name: 'WebM Video', extensions: ['webm'] }]
       : [{ name: 'WebM Video', extensions: ['webm'] }, { name: 'MP4 Video', extensions: ['mp4'] }],
   });
 
-  if (!filePath) return { canceled: true };
-
-  const tempWebm = path.join(os.tmpdir(), `rec-tmp-${Date.now()}.webm`);
-  fs.writeFileSync(tempWebm, Buffer.from(buffer as ArrayBuffer));
+  if (!filePath) {
+    fs.unlinkSync(tempPath);
+    return { canceled: true };
+  }
 
   if (filePath.endsWith('.webm')) {
-    fs.copyFileSync(tempWebm, filePath);
-    fs.unlinkSync(tempWebm);
+    fs.copyFileSync(tempPath, filePath);
+    fs.unlinkSync(tempPath);
     return { success: true, filePath };
   }
 
-  // Signal renderer to show overlay NOW (after dialog closed, before conversion)
+  // MP4 conversion with live progress
   event.sender.send('conversion-start');
-
-  // MP4 conversion — stream progress via IPC
   try {
     const ffmpegBin = getFfmpegPath();
     const totalSecs = durationSeconds as number;
 
     await new Promise<void>((resolve, reject) => {
       const proc = spawn(ffmpegBin, [
-        '-i', tempWebm,
+        '-i', tempPath,
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '22',
         '-c:a', 'aac', '-b:a', '128k',
         '-movflags', '+faststart',
@@ -267,21 +299,17 @@ ipcMain.handle('save-recording', async (event, { buffer, filename, durationSecon
         buf += chunk.toString();
         const lines = buf.split('\n');
         buf = lines.pop() ?? '';
-
         for (const line of lines) {
           if (!line.startsWith('out_time=')) continue;
           const timeStr = line.substring('out_time='.length).trim();
           if (timeStr === 'N/A') continue;
-
           const parts = timeStr.split(':');
           const outSecs = parseFloat(parts[0] ?? '0') * 3600
             + parseFloat(parts[1] ?? '0') * 60
             + parseFloat(parts[2] ?? '0');
-
           const percent = totalSecs > 0
             ? Math.min(99, Math.round((outSecs / totalSecs) * 100))
             : -1;
-
           event.sender.send('conversion-progress', { percent, currentSecs: Math.round(outSecs), totalSecs });
         }
       });
@@ -295,11 +323,22 @@ ipcMain.handle('save-recording', async (event, { buffer, filename, durationSecon
   } catch (err) {
     console.error('[main] ffmpeg conversion failed:', err);
     const fallbackPath = filePath.replace(/\.mp4$/, '.webm');
-    fs.copyFileSync(tempWebm, fallbackPath);
+    fs.copyFileSync(tempPath, fallbackPath);
     return { success: true, filePath: fallbackPath, warning: 'MP4 conversion failed, saved as WebM' };
   } finally {
-    if (fs.existsSync(tempWebm)) fs.unlinkSync(tempWebm);
+    if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
   }
+});
+
+// IPC: Cancel recording — discard temp file
+ipcMain.on('recording-cancel', () => {
+  recordingStream?.destroy();
+  recordingStream = null;
+  if (recordingTempPath && fs.existsSync(recordingTempPath)) {
+    fs.unlinkSync(recordingTempPath);
+  }
+  recordingTempPath = null;
+  console.log('[main] Recording cancelled, temp file discarded');
 });
 
 // IPC: Update tray tooltip + menu based on recording state

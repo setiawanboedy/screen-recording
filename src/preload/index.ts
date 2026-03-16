@@ -3,8 +3,13 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   getSources: () => ipcRenderer.invoke('get-sources'),
   setSource: (sourceId: string) => ipcRenderer.invoke('set-source', sourceId),
-  saveRecording: (buffer: ArrayBuffer, filename: string, durationSeconds: number) =>
-    ipcRenderer.invoke('save-recording', { buffer, filename, durationSeconds }),
+  // Streaming recording
+  initRecording: () => ipcRenderer.invoke('recording-init'),
+  sendChunk: (buf: ArrayBuffer) => ipcRenderer.send('recording-chunk', buf),
+  saveRecording: (filename: string, durationSeconds: number) =>
+    ipcRenderer.invoke('recording-save', { filename, durationSeconds }),
+  cancelRecording: () => ipcRenderer.send('recording-cancel'),
+  // Status & UI sync
   setRecordingStatus: (status: string) =>
     ipcRenderer.send('recording-status', status),
   onToggleRecording: (callback: () => void) =>
