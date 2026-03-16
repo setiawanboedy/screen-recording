@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 rpm
+
+      - name: Build distributable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run dist
+
+      - name: List release files
+        run: ls -lh release/
+
+      - name: Upload artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Screen Recorder ${{ github.ref_name }}
+          body: |
+            ## Screen Recorder ${{ github.ref_name }}
+
+            ### Installation
+
+            **Linux (Debian/Ubuntu):**
+            ```bash
+            sudo dpkg -i recording_*_amd64.deb
+            ```
+
+            **Linux (AppImage):**
+            ```bash
+            chmod +x "Screen Recorder-*.AppImage"
+            ./"Screen Recorder-*.AppImage" --no-sandbox
+            ```
+
+            > **Note for AppImage:** Requires `libfuse2`. Install with:
+            > ```bash
+            > sudo apt-get install libfuse2
+            > ```
+
+            ### Features
+            - 🖥️ Screen recording (select window or full screen)
+            - 🎙️ Microphone input with device selector
+            - 🔊 System audio capture (loopback)
+            - ⏸️ Pause/Resume recording
+            - ⏱️ Recording timer
+            - 🖤 Dark theme UI
+            - ⌨️ Global hotkeys: `Ctrl+Shift+R` (toggle), `Ctrl+Shift+P` (pause)
+            - 💾 Auto-save to `~/Videos/Screen Recorder/`
+          files: |
+            release/*.deb
+            release/*.AppImage
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build distributable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run dist
+
+      - name: List release files
+        run: Get-ChildItem release/ | Format-Table Name, Length
+
+      - name: Upload Windows installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

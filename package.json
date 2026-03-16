@@ -1,0 +1,50 @@
+{
+  "name": "recording",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Screen recorder with audio input and system audio capture",
+  "author": {
+    "name": "geek-dev",
+    "email": "geek-dev@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/geek-dev/screen-recorder",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "start": "bun run build && electron .",
+    "build": "bun build src/main/index.ts --outfile=dist/main/index.js --target=node --external electron && bun build src/preload/index.ts --outfile=dist/preload/index.cjs --target=node --external electron --format=cjs && bun build src/renderer/index.ts --outfile=dist/renderer/index.js --target=browser && cp src/renderer/index.html dist/renderer/index.html",
+    "dist": "bun run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.geekdev.recorder",
+    "productName": "Screen Recorder",
+    "publish": {
+      "provider": "github",
+      "owner": "setiawanboedy",
+      "repo": "screen-recording"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "linux": {
+      "target": ["deb", "AppImage"],
+      "category": "AudioVideo"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.5.0",
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
