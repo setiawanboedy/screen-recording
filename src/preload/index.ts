@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSource: (sourceId: string) => ipcRenderer.invoke('set-source', sourceId),
   // Streaming recording
   initRecording: () => ipcRenderer.invoke('recording-init'),
-  sendChunk: (buf: ArrayBuffer) => ipcRenderer.send('recording-chunk', buf),
+  sendChunk: (buf: ArrayBuffer) => ipcRenderer.invoke('recording-chunk', buf),
   saveRecording: (filename: string, durationSeconds: number) =>
     ipcRenderer.invoke('recording-save', { filename, durationSeconds }),
   cancelRecording: () => ipcRenderer.send('recording-cancel'),

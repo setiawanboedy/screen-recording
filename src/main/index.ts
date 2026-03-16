@@ -231,10 +231,13 @@ ipcMain.handle('recording-init', () => {
   console.log('[main] Recording stream opened:', recordingTempPath);
 });
 
-// IPC: Stream each chunk directly to temp file (fire-and-forget, ordered by IPC)
-ipcMain.on('recording-chunk', (_event, data: Buffer) => {
-  if (recordingStream && !recordingStream.destroyed) {
-    recordingStream.write(Buffer.from(data));
+// IPC: Stream each chunk — handle (not on) so renderer waits for ACK before next chunk
+ipcMain.handle('recording-chunk', async (_event, data: Buffer) => {
+  if (!recordingStream || recordingStream.destroyed) return;
+  const ok = recordingStream.write(Buffer.from(data));
+  if (!ok) {
+    // Respect backpressure — wait for drain before ACKing
+    await new Promise<void>(resolve => recordingStream!.once('drain', resolve));
   }
 });
 
@@ -252,6 +255,13 @@ ipcMain.handle('recording-save', async (event, { filename, durationSeconds = 0 }
 
   if (!tempPath || !fs.existsSync(tempPath)) {
     return { error: 'No recording data found' };
+  }
+
+  const fileSize = fs.statSync(tempPath).size;
+  console.log('[main] Temp file size:', fileSize, 'bytes');
+  if (fileSize === 0) {
+    fs.unlinkSync(tempPath);
+    return { error: 'Recording file is empty — no data was captured' };
   }
 
   const videosDir = path.join(app.getPath('videos'), 'Screen Recorder');
@@ -285,6 +295,7 @@ ipcMain.handle('recording-save', async (event, { filename, durationSeconds = 0 }
 
     await new Promise<void>((resolve, reject) => {
       const proc = spawn(ffmpegBin, [
+        '-fflags', '+genpts+discardcorrupt', // handle streaming WebM without seekable index
         '-i', tempPath,
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '22',
         '-c:a', 'aac', '-b:a', '128k',
@@ -295,6 +306,7 @@ ipcMain.handle('recording-save', async (event, { filename, durationSeconds = 0 }
       ]);
 
       let buf = '';
+      let stderrBuf = '';
       proc.stdout?.on('data', (chunk: Buffer) => {
         buf += chunk.toString();
         const lines = buf.split('\n');
@@ -313,8 +325,13 @@ ipcMain.handle('recording-save', async (event, { filename, durationSeconds = 0 }
           event.sender.send('conversion-progress', { percent, currentSecs: Math.round(outSecs), totalSecs });
         }
       });
+      proc.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString(); });
 
-      proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`)));
+      proc.on('close', (code) => {
+        if (code === 0) return resolve();
+        console.error('[main] ffmpeg stderr:', stderrBuf.slice(-800));
+        reject(new Error(`ffmpeg exited ${code}`));
+      });
       proc.on('error', reject);
     });
 
