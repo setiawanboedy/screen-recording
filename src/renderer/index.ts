@@ -4,7 +4,7 @@ declare global {
       getSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
       setSource: (sourceId: string) => Promise<void>;
       initRecording: () => Promise<void>;
-      sendChunk: (buf: ArrayBuffer) => void;
+      sendChunk: (buf: ArrayBuffer) => Promise<void>;
       saveRecording: (filename: string, durationSeconds: number) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; warning?: string; error?: string }>;
       cancelRecording: () => void;
       setRecordingStatus: (status: string) => void;
@@ -41,7 +41,7 @@ const convSub = document.getElementById('convSub') as HTMLDivElement;
 
 // State
 let mediaRecorder: MediaRecorder | null = null;
-let pendingChunks: Promise<void>[] = []; // track in-flight arrayBuffer() conversions
+let chunkChain: Promise<void> = Promise.resolve(); // sequential chain — only await the tail
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let elapsedSeconds = 0;
 let isPaused = false;
@@ -269,22 +269,23 @@ async function startRecording() {
       : 'video/webm';
 
     mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
-    pendingChunks = [];
+    chunkChain = Promise.resolve();
 
-    // Stream each chunk directly to main process — no in-memory buffering
+    // Stream each chunk directly to main process — sequential chain, no array growth
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
-        const p = e.data.arrayBuffer().then(buf => window.electronAPI.sendChunk(buf));
-        pendingChunks.push(p);
+        chunkChain = chunkChain.then(() =>
+          e.data.arrayBuffer().then(buf => window.electronAPI.sendChunk(buf))
+        );
       }
     };
 
     mediaRecorder.onstop = async () => {
-      console.log('[renderer] MediaRecorder stopped, flushing pending chunks...');
+      console.log('[renderer] MediaRecorder stopped, flushing last chunk...');
 
-      // Wait for all in-flight arrayBuffer() conversions to complete and be sent
-      await Promise.all(pendingChunks);
-      pendingChunks = [];
+      // Wait only for the tail of the chain — all prior links already resolved
+      await chunkChain;
+      chunkChain = Promise.resolve();
 
       const fmt = formatSelect.value as 'mp4' | 'webm';
       const duration = elapsedSeconds;

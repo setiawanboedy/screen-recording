@@ -297,9 +297,10 @@ ipcMain.handle('recording-save', async (event, { filename, durationSeconds = 0 }
       const proc = spawn(ffmpegBin, [
         '-fflags', '+genpts+discardcorrupt', // handle streaming WebM without seekable index
         '-i', tempPath,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '22',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k',
         '-movflags', '+faststart',
+        '-threads', '0',
         '-progress', 'pipe:1',
         '-nostats',
         '-y', filePath,
