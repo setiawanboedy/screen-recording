@@ -11,7 +11,7 @@
   "main": "dist/main/index.js",
   "scripts": {
     "start": "bun run build && electron .",
-    "build": "bun build src/main/index.ts --outfile=dist/main/index.js --target=node --external electron --external ffmpeg-static && bun build src/preload/index.ts --outfile=dist/preload/index.cjs --target=node --external electron --format=cjs && bun build src/renderer/index.ts --outfile=dist/renderer/index.js --target=browser && cp src/renderer/index.html dist/renderer/index.html",
+    "build": "bun build src/main/index.ts --outfile=dist/main/index.js --target=node --external electron --external ffmpeg-static && bun build src/preload/index.ts --outfile=dist/preload/index.cjs --target=node --external electron --format=cjs && bun build src/preload/toolbar.ts --outfile=dist/preload/toolbar.cjs --target=node --external electron --format=cjs && bun build src/renderer/index.ts --outfile=dist/renderer/index.js --target=browser && bun build src/renderer/toolbar.ts --outfile=dist/renderer/toolbar.js --target=browser && cp src/renderer/index.html dist/renderer/index.html && cp src/renderer/toolbar.html dist/renderer/toolbar.html",
     "dist": "bun run build && electron-builder"
   },
   "build": {

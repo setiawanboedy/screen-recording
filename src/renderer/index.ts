@@ -3,10 +3,13 @@ declare global {
     electronAPI: {
       getSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
       setSource: (sourceId: string) => Promise<void>;
-      saveRecording: (buffer: ArrayBuffer, filename: string) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean }>;
+      saveRecording: (buffer: ArrayBuffer, filename: string) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; warning?: string }>;
       setRecordingStatus: (status: string) => void;
       onToggleRecording: (callback: () => void) => void;
       onTogglePause: (callback: () => void) => void;
+      showFloatingToolbar: () => void;
+      hideFloatingToolbar: () => void;
+      syncToolbar: (timer: string, state: 'recording' | 'paused') => void;
     };
   }
 }
@@ -45,7 +48,9 @@ function startTimer() {
   timerInterval = setInterval(() => {
     if (!isPaused) {
       elapsedSeconds++;
-      timerEl.textContent = formatTime(elapsedSeconds);
+      const t = formatTime(elapsedSeconds);
+      timerEl.textContent = t;
+      window.electronAPI.syncToolbar(t, 'recording');
     }
   }, 1000);
 }
@@ -241,6 +246,8 @@ async function startRecording() {
     startTimer();
     setStatus('recording');
     updateButtons('recording');
+    window.electronAPI.showFloatingToolbar();
+    window.electronAPI.syncToolbar('00:00:00', 'recording');
     console.log('[renderer] Recording started!');
 
   } catch (err) {
@@ -253,6 +260,7 @@ async function startRecording() {
 // Stop recording
 function stopRecording() {
   console.log('[renderer] stopRecording called, state:', mediaRecorder?.state);
+  window.electronAPI.hideFloatingToolbar();
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
   }
@@ -268,11 +276,13 @@ function togglePause() {
     isPaused = false;
     setStatus('recording');
     pauseBtn.textContent = '⏸ Pause';
+    window.electronAPI.syncToolbar(formatTime(elapsedSeconds), 'recording');
   } else {
     mediaRecorder.pause();
     isPaused = true;
     setStatus('paused');
     pauseBtn.textContent = '▶ Resume';
+    window.electronAPI.syncToolbar(formatTime(elapsedSeconds), 'paused');
   }
 }
 

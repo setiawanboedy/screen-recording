@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, dialog, Tray, Menu, globalShortcut, nativeImage, session } from 'electron';
+import { app, BrowserWindow, ipcMain, desktopCapturer, dialog, Tray, Menu, globalShortcut, nativeImage, session, screen as electronScreen } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -7,21 +7,21 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
-// ffmpeg-static provides path to bundled ffmpeg binary
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ffmpegStaticPath: string = require('ffmpeg-static');
 
 function getFfmpegPath(): string {
   if (app.isPackaged) {
-    // In packaged app, binary is unpacked from asar
     return path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', 'ffmpeg');
   }
   return ffmpegStaticPath;
 }
 
 let mainWindow: BrowserWindow | null = null;
+let floatingToolbar: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let selectedSourceId: string | null = null;
+let recordingState: 'idle' | 'recording' | 'paused' = 'idle';
 
 const appRoot = () => app.getAppPath();
 
@@ -30,6 +30,82 @@ const getIconPath = () => {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'assets', iconFile)
     : path.join(appRoot(), 'assets', iconFile);
+};
+
+// ── Tray ──────────────────────────────────────────────────────────────────
+const updateTrayMenu = () => {
+  if (!tray) return;
+  const isRec = recordingState !== 'idle';
+  const isPaused = recordingState === 'paused';
+
+  tray.setToolTip(
+    isRec
+      ? `Screen Recorder — ${isPaused ? '⏸ PAUSED' : '⏺ RECORDING'}`
+      : 'Screen Recorder'
+  );
+
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Show Window', click: () => mainWindow?.show() },
+    { type: 'separator' },
+    ...(isRec
+      ? [
+          {
+            label: isPaused ? '▶ Resume' : '⏸ Pause',
+            click: () => mainWindow?.webContents.send('toggle-pause'),
+          },
+          {
+            label: '⏹ Stop Recording',
+            click: () => mainWindow?.webContents.send('toggle-recording'),
+          },
+        ]
+      : [
+          {
+            label: '⏺ Start Recording',
+            click: () => { mainWindow?.show(); mainWindow?.webContents.send('toggle-recording'); },
+          },
+        ]),
+    { type: 'separator' },
+    { label: 'Quit', click: () => { tray?.destroy(); tray = null; app.quit(); } },
+  ]));
+};
+
+// ── Floating Toolbar ──────────────────────────────────────────────────────
+const showFloatingToolbar = () => {
+  if (floatingToolbar && !floatingToolbar.isDestroyed()) {
+    floatingToolbar.show();
+    return;
+  }
+
+  const { width: sw, height: sh } = electronScreen.getPrimaryDisplay().workAreaSize;
+  const W = 360, H = 56;
+
+  floatingToolbar = new BrowserWindow({
+    width: W,
+    height: H,
+    x: Math.round((sw - W) / 2),
+    y: sh - H - 24,
+    frame: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    backgroundColor: '#1a1a2e',
+    webPreferences: {
+      preload: path.join(appRoot(), 'dist', 'preload', 'toolbar.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  floatingToolbar.setAlwaysOnTop(true, 'floating');
+  floatingToolbar.loadFile(path.join(appRoot(), 'dist', 'renderer', 'toolbar.html'));
+
+  floatingToolbar.on('closed', () => { floatingToolbar = null; });
+};
+
+const hideFloatingToolbar = () => {
+  if (floatingToolbar && !floatingToolbar.isDestroyed()) {
+    floatingToolbar.hide();
+  }
 };
 
 const createWindow = () => {
@@ -49,14 +125,12 @@ const createWindow = () => {
     },
   });
 
-  // Grant all media permissions
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(true);
   });
 
   session.defaultSession.setPermissionCheckHandler(() => true);
 
-  // Handle getDisplayMedia — use selected source or first screen
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
     const selected = selectedSourceId
@@ -73,7 +147,6 @@ const createWindow = () => {
   });
 
   mainWindow.loadFile(path.join(appRoot(), 'dist', 'renderer', 'index.html'));
-  // mainWindow.webContents.openDevTools();
 
   mainWindow.on('close', (e) => {
     if (tray) {
@@ -86,16 +159,8 @@ const createWindow = () => {
 const createTray = () => {
   const icon = nativeImage.createFromPath(getIconPath()).resize({ width: 16, height: 16 });
   tray = new Tray(icon);
-  tray.setToolTip('Screen Recorder');
-
-  const contextMenu = Menu.buildFromTemplate([
-    { label: 'Show', click: () => mainWindow?.show() },
-    { label: 'Toggle Recording', click: () => mainWindow?.webContents.send('toggle-recording') },
-    { type: 'separator' },
-    { label: 'Quit', click: () => { tray?.destroy(); tray = null; app.quit(); } },
-  ]);
-  tray.setContextMenu(contextMenu);
   tray.on('click', () => mainWindow?.show());
+  updateTrayMenu(); // build initial menu
 };
 
 const registerShortcuts = () => {
@@ -211,9 +276,26 @@ ipcMain.handle('save-recording', async (_event, { buffer, filename }) => {
   }
 });
 
-// IPC: Update tray tooltip
-ipcMain.on('recording-status', (_event, status: string) => {
-  if (tray) {
-    tray.setToolTip(`Screen Recorder - ${status}`);
+// IPC: Update tray tooltip + menu based on recording state
+ipcMain.on('recording-status', (_event, status: 'idle' | 'recording' | 'paused') => {
+  recordingState = status;
+  updateTrayMenu();
+});
+
+// IPC: Floating toolbar visibility
+ipcMain.on('show-floating-toolbar', () => showFloatingToolbar());
+ipcMain.on('hide-floating-toolbar', () => hideFloatingToolbar());
+
+// IPC: Sync timer + state from renderer → toolbar
+ipcMain.on('toolbar-sync', (_event, data: { timer: string; state: 'recording' | 'paused' }) => {
+  floatingToolbar?.webContents.send('toolbar-update', data);
+});
+
+// IPC: Toolbar buttons → relay to main window
+ipcMain.on('toolbar-action', (_event, action: 'pause' | 'stop') => {
+  if (action === 'pause') {
+    mainWindow?.webContents.send('toggle-pause');
+  } else if (action === 'stop') {
+    mainWindow?.webContents.send('toggle-recording');
   }
 });

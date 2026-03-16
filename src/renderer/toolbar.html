@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #1a1a2e;
+      border: 1.5px solid #e94560;
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      height: 56px;
+      padding: 0 14px;
+      gap: 12px;
+      -webkit-app-region: drag;
+    }
+
+    .rec-dot {
+      width: 11px;
+      height: 11px;
+      background: #e94560;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: blink 1s infinite;
+      -webkit-app-region: no-drag;
+    }
+
+    .rec-dot.paused {
+      background: #f5a623;
+      animation: none;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.2; }
+    }
+
+    .timer {
+      font-family: 'Courier New', monospace;
+      font-size: 17px;
+      font-weight: bold;
+      color: #e94560;
+      letter-spacing: 2px;
+      min-width: 84px;
+      -webkit-app-region: no-drag;
+    }
+
+    .timer.paused { color: #f5a623; }
+
+    .divider {
+      width: 1px;
+      height: 28px;
+      background: #2d3748;
+      flex-shrink: 0;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 7px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .btn-pause { background: #f5a623; color: #1a1a2e; }
+    .btn-pause:hover { background: #e09515; transform: scale(1.04); }
+
+    .btn-stop { background: #4a5568; color: #e0e0e0; }
+    .btn-stop:hover { background: #5a6578; transform: scale(1.04); }
+
+    .drag-hint {
+      font-size: 10px;
+      color: #2d3748;
+      letter-spacing: 1px;
+      margin-left: auto;
+      -webkit-app-region: drag;
+    }
+  </style>
+</head>
+<body>
+  <div class="rec-dot" id="recDot"></div>
+  <div class="timer" id="timer">00:00:00</div>
+  <div class="divider"></div>
+  <button class="btn btn-pause" id="pauseBtn">⏸ Pause</button>
+  <button class="btn btn-stop" id="stopBtn">⏹ Stop</button>
+  <span class="drag-hint">⠿</span>
+  <script src="./toolbar.js"></script>
+</body>
+</html>

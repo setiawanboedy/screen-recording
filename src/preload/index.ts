@@ -11,4 +11,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('toggle-recording', callback),
   onTogglePause: (callback: () => void) =>
     ipcRenderer.on('toggle-pause', callback),
+  // Floating toolbar
+  showFloatingToolbar: () => ipcRenderer.send('show-floating-toolbar'),
+  hideFloatingToolbar: () => ipcRenderer.send('hide-floating-toolbar'),
+  syncToolbar: (timer: string, state: 'recording' | 'paused') =>
+    ipcRenderer.send('toolbar-sync', { timer, state }),
 });
