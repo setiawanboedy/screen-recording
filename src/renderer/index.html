@@ -65,7 +65,6 @@
     .preview-container {
       flex: 1;
       min-height: 0;
-      max-height: 40vh;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -106,15 +105,23 @@
 
     .settings-row {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       align-items: center;
     }
 
     .setting-group {
       flex: 1;
+      min-width: 0;
       display: flex;
       flex-direction: column;
       gap: 4px;
+    }
+
+    .setting-group select {
+      width: 100%;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
     }
 
     .setting-group label {
@@ -310,25 +317,23 @@
 
   <div class="settings-panel">
     <div class="settings-row">
-      <div class="setting-group">
+      <div class="setting-group" style="flex: 2;">
         <label>Screen Source</label>
         <select id="sourceSelect">
           <option value="">Select screen or window...</option>
         </select>
       </div>
-      <div class="setting-group">
+      <div class="setting-group" style="flex: 2;">
         <label>Microphone</label>
         <select id="micSelect">
           <option value="">No microphone</option>
         </select>
       </div>
-    </div>
-    <div class="settings-row">
-      <div class="setting-group" style="max-width: 180px;">
-        <label>Output Format</label>
+      <div class="setting-group" style="flex: 1;">
+        <label>Format</label>
         <select id="formatSelect">
-          <option value="mp4" selected>MP4 (H.264) — recommended</option>
-          <option value="webm">WebM (VP9) — no conversion</option>
+          <option value="webm" selected>WebM</option>
+          <option value="mp4">MP4</option>
         </select>
       </div>
     </div>

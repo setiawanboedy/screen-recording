@@ -13,7 +13,7 @@ declare global {
       showFloatingToolbar: () => void;
       hideFloatingToolbar: () => void;
       syncToolbar: (timer: string, state: 'recording' | 'paused') => void;
-      onConversionStart: (cb: () => void) => void;
+      onConversionStart: (cb: (opts?: { mode?: string }) => void) => void;
       onConversionProgress: (cb: (data: { percent: number; currentSecs: number; totalSecs: number }) => void) => void;
     };
   }
@@ -99,7 +99,21 @@ async function hideConversionOverlay() {
 }
 
 // Listen to conversion events from main process
-window.electronAPI.onConversionStart(() => showConversionOverlay());
+window.electronAPI.onConversionStart((opts?: { mode?: string }) => {
+  const mode = opts?.mode ?? 'convert';
+  if (mode === 'copy') {
+    convTitle.textContent = 'Saving Recording';
+    convSub.textContent = 'Copying file…';
+  } else {
+    convTitle.textContent = 'Converting to MP4';
+    convSub.textContent = 'Please wait…';
+  }
+  progressFill.style.width = '0%';
+  progressFill.classList.add('indeterminate');
+  progressPercent.textContent = '…';
+  progressTime.textContent = '';
+  conversionOverlay.classList.add('visible');
+});
 window.electronAPI.onConversionProgress(({ percent, currentSecs, totalSecs }) => {
   updateConversionProgress(percent, currentSecs, totalSecs);
 });
@@ -303,9 +317,8 @@ async function startRecording() {
         `recording-${Date.now()}.${fmt}`, duration
       );
 
-      if (fmt === 'mp4') await hideConversionOverlay();
-
       if (result.filePath) {
+        await hideConversionOverlay();
         console.log('[renderer] Saved to', result.filePath);
         if (result.warning) {
           alert(`Saved (as WebM fallback):\n${result.filePath}\n\n⚠️ ${result.warning}`);

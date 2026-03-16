@@ -282,9 +282,35 @@ ipcMain.handle('recording-save', async (event, { filename, durationSeconds = 0 }
   }
 
   if (filePath.endsWith('.webm')) {
-    fs.copyFileSync(tempPath, filePath);
-    fs.unlinkSync(tempPath);
-    return { success: true, filePath };
+    // Show saving indicator for copy operation
+    event.sender.send('conversion-start', { mode: 'copy' });
+    try {
+      const totalBytes = fs.statSync(tempPath).size;
+      const CHUNK = 1024 * 1024; // 1 MB copy chunks
+      const src = fs.openSync(tempPath, 'r');
+      const dst = fs.openSync(filePath, 'w');
+      const buf = Buffer.alloc(CHUNK);
+      let written = 0;
+      let bytesRead: number;
+
+      while ((bytesRead = fs.readSync(src, buf, 0, CHUNK, null)) > 0) {
+        fs.writeSync(dst, buf, 0, bytesRead);
+        written += bytesRead;
+        const percent = Math.min(99, Math.round((written / totalBytes) * 100));
+        event.sender.send('conversion-progress', { percent, currentSecs: 0, totalSecs: 0 });
+      }
+
+      fs.closeSync(src);
+      fs.closeSync(dst);
+      fs.unlinkSync(tempPath);
+      event.sender.send('conversion-progress', { percent: 100, currentSecs: 0, totalSecs: 0 });
+      return { success: true, filePath };
+    } catch (copyErr) {
+      console.error('[main] Copy failed, trying fallback:', copyErr);
+      fs.copyFileSync(tempPath, filePath);
+      fs.unlinkSync(tempPath);
+      return { success: true, filePath };
+    }
   }
 
   // MP4 conversion with live progress
