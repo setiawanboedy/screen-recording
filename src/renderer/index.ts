@@ -22,6 +22,7 @@ const pauseBtn = document.getElementById('pauseBtn') as HTMLButtonElement;
 const stopBtn = document.getElementById('stopBtn') as HTMLButtonElement;
 const sourceSelect = document.getElementById('sourceSelect') as HTMLSelectElement;
 const micSelect = document.getElementById('micSelect') as HTMLSelectElement;
+const formatSelect = document.getElementById('formatSelect') as HTMLSelectElement;
 const timerEl = document.getElementById('timer') as HTMLDivElement;
 const statusBadge = document.getElementById('statusBadge') as HTMLSpanElement;
 
@@ -218,12 +219,16 @@ async function startRecording() {
       const blob = new Blob(recordedChunks, { type: mimeType });
       const buffer = await blob.arrayBuffer();
 
-      // Show converting status
-      setStatus('idle');
-      statusBadge.className = 'status-badge status-paused';
-      statusBadge.textContent = 'CONVERTING…';
+      const fmt = formatSelect.value as 'mp4' | 'webm';
 
-      const result = await window.electronAPI.saveRecording(buffer, `recording-${Date.now()}.mp4`);
+      // Show converting status only for MP4 (needs ffmpeg)
+      setStatus('idle');
+      if (fmt === 'mp4') {
+        statusBadge.className = 'status-badge status-paused';
+        statusBadge.textContent = 'CONVERTING…';
+      }
+
+      const result = await window.electronAPI.saveRecording(buffer, `recording-${Date.now()}.${fmt}`);
       if (result.filePath) {
         console.log('[renderer] Saved to', result.filePath);
         if ('warning' in result && result.warning) {
@@ -293,6 +298,7 @@ function updateButtons(state: 'idle' | 'recording') {
   stopBtn.disabled = state === 'idle';
   sourceSelect.disabled = state === 'recording';
   micSelect.disabled = state === 'recording';
+  formatSelect.disabled = state === 'recording';
   console.log('[renderer] Buttons updated:', state, '| pause disabled:', pauseBtn.disabled, '| stop disabled:', stopBtn.disabled);
 }
 
