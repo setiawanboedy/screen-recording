@@ -214,6 +214,180 @@
       border: 1px solid #4a5568;
     }
 
+    /* ── Noise Reduction Toggle ─────────────────────────── */
+    .toggle-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .toggle-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #718096;
+      font-weight: 600;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 36px;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #2d3748;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 0.2s;
+      border: 1px solid #4a5568;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 2px;
+      top: 2px;
+      background: #718096;
+      border-radius: 50%;
+      transition: transform 0.2s, background 0.2s;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: #45e97c1a;
+      border-color: #45e97c;
+    }
+
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(18px);
+      background: #45e97c;
+    }
+
+    .toggle-switch input:disabled + .toggle-slider {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .toggle-text {
+      font-size: 12px;
+      color: #a0aec0;
+      white-space: nowrap;
+    }
+
+    .toggle-text.active {
+      color: #45e97c;
+    }
+
+    /* ── Refresh Button ─────────────────────────────────── */
+    .btn-refresh {
+      background: none;
+      border: 1px solid #0f3460;
+      color: #718096;
+      padding: 0 8px;
+      border-radius: 5px;
+      font-size: 13px;
+      cursor: pointer;
+      height: 34px;
+      transition: all 0.2s;
+      align-self: flex-end;
+      flex-shrink: 0;
+    }
+
+    .btn-refresh:hover:not(:disabled) {
+      border-color: #533483;
+      color: #e0e0e0;
+      transform: none;
+    }
+
+    .btn-refresh:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .btn-refresh.spinning { animation: spin 0.6s linear infinite; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Device hint ─────────────────────────────────────── */
+    .device-hint {
+      font-size: 10px;
+      color: #4a5568;
+      margin-top: 2px;
+      line-height: 1.4;
+    }
+
+    .device-hint.warn { color: #f5a623; }
+
+    /* ── Mic Level Meter ────────────────────────────────── */
+    .mic-meter-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .mic-meter-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 36px;
+    }
+
+    .mic-icon {
+      font-size: 16px;
+      flex-shrink: 0;
+      transition: filter 0.15s;
+      line-height: 1;
+    }
+
+    .mic-icon.active {
+      filter: drop-shadow(0 0 5px #53d769);
+    }
+
+    .mic-icon.loud {
+      filter: drop-shadow(0 0 7px #f5a623);
+    }
+
+    .mic-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 22px;
+    }
+
+    .mic-bar {
+      width: 4px;
+      border-radius: 2px;
+      background: #2d3748;
+      transition: height 0.08s ease, background 0.08s ease;
+      min-height: 3px;
+    }
+
+    .mic-meter-label {
+      font-size: 11px;
+      color: #4a5568;
+      white-space: nowrap;
+      min-width: 60px;
+    }
+
+    .mic-meter-label.testing { color: #53d769; }
+    .mic-meter-label.loud    { color: #f5a623; }
+    .mic-meter-label.clip    { color: #e94560; }
+
     /* ── Conversion Overlay ─────────────────────────────── */
     .conversion-overlay {
       display: none;
@@ -325,9 +499,13 @@
       </div>
       <div class="setting-group" style="flex: 2;">
         <label>Microphone</label>
-        <select id="micSelect">
-          <option value="">No microphone</option>
-        </select>
+        <div style="display:flex; gap:6px; align-items:flex-end;">
+          <select id="micSelect" style="flex:1; min-width:0;">
+            <option value="">No microphone</option>
+          </select>
+          <button class="btn-refresh" id="refreshMicBtn" title="Refresh device list">↺</button>
+        </div>
+        <div class="device-hint" id="micHint"></div>
       </div>
       <div class="setting-group" style="flex: 1;">
         <label>Format</label>
@@ -335,6 +513,51 @@
           <option value="webm" selected>WebM</option>
           <option value="mp4">MP4</option>
         </select>
+      </div>
+    </div>
+    <div class="settings-row">
+      <div class="toggle-group">
+        <span class="toggle-label">System Audio</span>
+        <div class="toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="systemAudioToggle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-text active" id="systemAudioLabel">ON — Record desktop audio</span>
+        </div>
+      </div>
+
+      <div class="toggle-group" style="margin-left: 20px;">
+        <span class="toggle-label">Noise Reduction</span>
+        <div class="toggle-row">
+          <label class="toggle-switch">
+            <input type="checkbox" id="noiseReductionToggle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-text active" id="noiseReductionLabel">ON — Background noise reduction active</span>
+        </div>
+      </div>
+
+      <div class="mic-meter-wrap" style="margin-left: auto;">
+        <span class="toggle-label">Mic Level</span>
+        <div class="mic-meter-row">
+          <span class="mic-icon" id="micIcon">🎙️</span>
+          <div class="mic-bars" id="micBars">
+            <div class="mic-bar" id="micBar0"></div>
+            <div class="mic-bar" id="micBar1"></div>
+            <div class="mic-bar" id="micBar2"></div>
+            <div class="mic-bar" id="micBar3"></div>
+            <div class="mic-bar" id="micBar4"></div>
+            <div class="mic-bar" id="micBar5"></div>
+            <div class="mic-bar" id="micBar6"></div>
+            <div class="mic-bar" id="micBar7"></div>
+            <div class="mic-bar" id="micBar8"></div>
+            <div class="mic-bar" id="micBar9"></div>
+            <div class="mic-bar" id="micBar10"></div>
+            <div class="mic-bar" id="micBar11"></div>
+          </div>
+          <span class="mic-meter-label" id="micMeterLabel">No mic</span>
+        </div>
       </div>
     </div>
   </div>
@@ -349,8 +572,6 @@
     <kbd>Ctrl+Shift+R</kbd> Toggle Recording &nbsp;&nbsp;
     <kbd>Ctrl+Shift+P</kbd> Toggle Pause
   </div>
-
-  <script src="./index.js"></script>
 
   <!-- Conversion Progress Overlay -->
   <div id="conversionOverlay" class="conversion-overlay">
@@ -371,5 +592,7 @@
       </div>
     </div>
   </div>
+
+  <script src="./index.js"></script>
 </body>
 </html>

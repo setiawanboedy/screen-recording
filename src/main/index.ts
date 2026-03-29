@@ -19,6 +19,7 @@ let floatingToolbar: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let selectedSourceId: string | null = null;
 let recordingState: 'idle' | 'recording' | 'paused' = 'idle';
+let captureSystemAudio = true;
 
 // Streaming recording state
 let recordingStream: ReturnType<typeof fs.createWriteStream> | null = null;
@@ -139,8 +140,8 @@ const createWindow = () => {
       : sources[0];
 
     if (selected) {
-      console.log('[main] Display media: using source', selected.name);
-      callback({ video: selected, audio: 'loopback' });
+      console.log('[main] Display media: using source', selected.name, '| system audio:', captureSystemAudio);
+      callback({ video: selected, audio: captureSystemAudio ? 'loopback' : undefined });
     } else {
       console.log('[main] Display media: no source found');
       callback({});
@@ -218,6 +219,12 @@ ipcMain.handle('get-sources', async () => {
 ipcMain.handle('set-source', (_event, sourceId: string) => {
   selectedSourceId = sourceId;
   console.log('[main] Selected source:', sourceId);
+});
+
+// IPC: Set system audio capture mode
+ipcMain.handle('set-audio-mode', (_event, enabled: boolean) => {
+  captureSystemAudio = enabled;
+  console.log('[main] System audio capture:', captureSystemAudio);
 });
 
 // IPC: Open a write stream for streaming chunks during recording
