@@ -401,11 +401,12 @@ noiseReductionToggle.addEventListener('change', () => {
 });
 
 /**
- * Connect audio source ke graph dengan optional background noise gate.
+ * Connect audio source ke graph dengan optional two-stage noise reduction.
  * Dipakai untuk system audio (loopback) — meredam suara background/ambient.
  *
- * Tier 1: AudioWorklet spectral gate (noise-processor.js)
- * Tier 2: Fallback — direct connect
+ * Stage 1: STFT Spectral Subtraction — bersihkan noise per frekuensi bin
+ * Stage 2: RMS Noise Gate soft-knee  — tangkap residual broadband noise
+ * Fallback: direct connect jika AudioWorklet tidak tersedia
  */
 async function connectWithNoiseGate(
   audioContext: AudioContext,
@@ -427,17 +428,19 @@ async function connectWithNoiseGate(
       outputChannelCount: [2],
     });
 
-    noiseGate.port.onmessage = (e: MessageEvent<{ type: string; noiseFloor: number; avgRms: number }>) => {
-      if (e.data.type === 'calibrated') {
+    noiseGate.port.onmessage = (e: MessageEvent<{ type: string; meanNoisePow?: number; noiseFloor?: number; avgRms?: number }>) => {
+      if (e.data.type === 'stage1-calibrated') {
+        console.log(`[noise-gate] Stage 1 kalibrasi selesai | meanNoisePow=${e.data.meanNoisePow?.toFixed(8)}`);
+      } else if (e.data.type === 'stage2-calibrated') {
         console.log(
-          `[noise-gate] Kalibrasi selesai | avgRms=${e.data.avgRms.toFixed(6)} | noiseFloor=${e.data.noiseFloor.toFixed(6)} | threshold=${(e.data.noiseFloor * 3).toFixed(6)}`
+          `[noise-gate] Stage 2 kalibrasi selesai | avgRms=${e.data.avgRms?.toFixed(6)} | noiseFloor=${e.data.noiseFloor?.toFixed(6)} | threshold=${((e.data.noiseFloor ?? 0) * 3).toFixed(6)}`
         );
       }
     };
 
     source.connect(noiseGate);
     noiseGate.connect(dest);
-    console.log('[renderer] Background noise reduction: AudioWorklet spectral gate active on system audio');
+    console.log('[renderer] Background noise reduction: two-stage (STFT spectral subtraction + RMS gate) active on system audio');
   } catch (workletErr) {
     console.warn('[renderer] AudioWorklet failed, falling back to direct connect:', workletErr);
     source.connect(dest);
