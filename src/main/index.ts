@@ -310,8 +310,10 @@ const hideFloatingToolbar = () => {
 
 const captureCurrentDisplayScreenshot = async (): Promise<ArrayBuffer> => {
   const restoreState = await hideCaptureWindows();
+  finalizeCaptureWindowHiding(restoreState);
 
   try {
+    await delay(process.platform === 'linux' ? 180 : 80);
     const capture = await captureCurrentDisplayImage();
     return capture.data;
   } finally {
