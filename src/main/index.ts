@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, dialog, Tray, Menu, globalShortcut, nativeImage, session, screen as electronScreen } from 'electron';
+import { app, BrowserWindow, ipcMain, desktopCapturer, dialog, Tray, Menu, globalShortcut, nativeImage, session, screen as electronScreen, type Display } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -24,14 +24,212 @@ let captureSystemAudio = true;
 // Streaming recording state
 let recordingStream: ReturnType<typeof fs.createWriteStream> | null = null;
 let recordingTempPath: string | null = null;
+let screenshotSelectionWindow: BrowserWindow | null = null;
+
+type ScreenshotResult = {
+  success?: boolean;
+  filePath?: string;
+  canceled?: boolean;
+  error?: string;
+};
+
+type HiddenWindowState = {
+  restore: boolean;
+  usedOpacity: boolean;
+  opacity: number;
+};
+
+type HiddenCaptureState = {
+  mainWindow: HiddenWindowState;
+  toolbar: HiddenWindowState;
+};
+
+type ScreenshotSelectionSession = {
+  dataUrl: string;
+  restoreState: HiddenCaptureState;
+  resolve: (result: ScreenshotResult) => void;
+};
+
+let screenshotSelectionSession: ScreenshotSelectionSession | null = null;
 
 const appRoot = () => app.getAppPath();
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+const bufferToArrayBuffer = (buffer: Buffer): ArrayBuffer =>
+  Uint8Array.from(buffer).buffer;
 
 const getIconPath = () => {
   const iconFile = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
   return app.isPackaged
     ? path.join(process.resourcesPath, 'assets', iconFile)
     : path.join(appRoot(), 'assets', iconFile);
+};
+
+const hideWindowForCapture = (targetWindow: BrowserWindow | null): HiddenWindowState => {
+  if (!targetWindow || targetWindow.isDestroyed() || !targetWindow.isVisible()) {
+    return { restore: false, usedOpacity: false, opacity: 1 };
+  }
+
+  if (process.platform === 'linux') {
+    const opacity = targetWindow.getOpacity();
+    targetWindow.setIgnoreMouseEvents(true);
+    targetWindow.setOpacity(0);
+    return { restore: true, usedOpacity: true, opacity };
+  }
+
+  targetWindow.hide();
+  return { restore: true, usedOpacity: false, opacity: 1 };
+};
+
+const restoreWindowAfterCapture = (
+  targetWindow: BrowserWindow | null,
+  state: HiddenWindowState,
+  focusWindow = false
+) => {
+  if (!state.restore || !targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  if (state.usedOpacity) {
+    targetWindow.setOpacity(state.opacity);
+    targetWindow.setIgnoreMouseEvents(false);
+  }
+
+  targetWindow.show();
+
+  if (focusWindow) {
+    targetWindow.focus();
+  }
+};
+
+const fullyHideWindowAfterCapture = (
+  targetWindow: BrowserWindow | null,
+  state: HiddenWindowState
+) => {
+  if (!state.restore || !state.usedOpacity || !targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  targetWindow.hide();
+  targetWindow.setOpacity(state.opacity);
+  targetWindow.setIgnoreMouseEvents(false);
+};
+
+const finalizeCaptureWindowHiding = (state: HiddenCaptureState) => {
+  fullyHideWindowAfterCapture(mainWindow, state.mainWindow);
+  fullyHideWindowAfterCapture(floatingToolbar, state.toolbar);
+};
+
+const hideCaptureWindows = async (): Promise<HiddenCaptureState> => {
+  const state: HiddenCaptureState = {
+    mainWindow: hideWindowForCapture(mainWindow),
+    toolbar: hideWindowForCapture(floatingToolbar),
+  };
+
+  if (state.mainWindow.restore || state.toolbar.restore) {
+    await delay(process.platform === 'linux' ? 80 : 140);
+  }
+
+  return state;
+};
+
+const restoreCaptureWindows = (state: HiddenCaptureState) => {
+  restoreWindowAfterCapture(mainWindow, state.mainWindow, true);
+  restoreWindowAfterCapture(floatingToolbar, state.toolbar);
+};
+
+const captureCurrentDisplayImage = async () => {
+  const cursorPoint = electronScreen.getCursorScreenPoint();
+  const targetDisplay = electronScreen.getDisplayNearestPoint(cursorPoint);
+  const thumbnailSize = {
+    width: Math.max(1, Math.round(targetDisplay.bounds.width * targetDisplay.scaleFactor)),
+    height: Math.max(1, Math.round(targetDisplay.bounds.height * targetDisplay.scaleFactor)),
+  };
+
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize,
+  });
+
+  const selectedSource = sources.find(source => source.display_id === String(targetDisplay.id)) ?? sources[0];
+  if (!selectedSource) {
+    throw new Error('No screen available for capture');
+  }
+
+  const pngBuffer = selectedSource.thumbnail.toPNG();
+  if (pngBuffer.byteLength === 0) {
+    throw new Error('Captured screenshot is empty');
+  }
+
+  return {
+    display: targetDisplay,
+    data: bufferToArrayBuffer(pngBuffer),
+    dataUrl: `data:image/png;base64,${pngBuffer.toString('base64')}`,
+  };
+};
+
+const saveScreenshotToDisk = async (filename: string, data: ArrayBuffer): Promise<ScreenshotResult> => {
+  const picturesDir = path.join(app.getPath('pictures'), 'Screen Recorder');
+  if (!fs.existsSync(picturesDir)) fs.mkdirSync(picturesDir, { recursive: true });
+
+  const { filePath } = await dialog.showSaveDialog({
+    buttonLabel: 'Save screenshot',
+    defaultPath: path.join(picturesDir, filename),
+    filters: [{ name: 'PNG Image', extensions: ['png'] }],
+  });
+
+  if (!filePath) {
+    return { canceled: true };
+  }
+
+  const outputPath = path.extname(filePath) ? filePath : `${filePath}.png`;
+
+  try {
+    fs.writeFileSync(outputPath, Buffer.from(data));
+    console.log('[main] Screenshot saved:', outputPath);
+    return { success: true, filePath: outputPath };
+  } catch (err) {
+    console.error('[main] save-screenshot error:', err);
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
+const saveScreenshotDirectly = (filename: string, data: ArrayBuffer): ScreenshotResult => {
+  const picturesDir = path.join(app.getPath('pictures'), 'Screen Recorder');
+  if (!fs.existsSync(picturesDir)) fs.mkdirSync(picturesDir, { recursive: true });
+
+  const outputPath = path.join(
+    picturesDir,
+    path.extname(filename) ? filename : `${filename}.png`
+  );
+
+  try {
+    fs.writeFileSync(outputPath, Buffer.from(data));
+    console.log('[main] Screenshot saved:', outputPath);
+    return { success: true, filePath: outputPath };
+  } catch (err) {
+    console.error('[main] save-screenshot-direct error:', err);
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
+const finalizeScreenshotSelection = (result: ScreenshotResult): ScreenshotResult => {
+  const session = screenshotSelectionSession;
+  const overlayWindow = screenshotSelectionWindow;
+
+  screenshotSelectionSession = null;
+  screenshotSelectionWindow = null;
+
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.close();
+  }
+
+  if (session) {
+    restoreCaptureWindows(session.restoreState);
+    session.resolve(result);
+  }
+
+  return result;
 };
 
 // ── Tray ──────────────────────────────────────────────────────────────────
@@ -110,6 +308,72 @@ const hideFloatingToolbar = () => {
   }
 };
 
+const captureCurrentDisplayScreenshot = async (): Promise<ArrayBuffer> => {
+  const restoreState = await hideCaptureWindows();
+
+  try {
+    const capture = await captureCurrentDisplayImage();
+    return capture.data;
+  } finally {
+    restoreCaptureWindows(restoreState);
+  }
+};
+
+const createScreenshotSelectionWindow = (display: Display) => {
+  const useFullscreenOverlay = process.platform === 'linux';
+
+  screenshotSelectionWindow = new BrowserWindow({
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    frame: false,
+    show: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreen: useFullscreenOverlay,
+    fullscreenable: useFullscreenOverlay,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#000000',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(appRoot(), 'dist', 'preload', 'index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  screenshotSelectionWindow.setAlwaysOnTop(true, 'screen-saver');
+  screenshotSelectionWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  screenshotSelectionWindow.removeMenu();
+  screenshotSelectionWindow.loadFile(path.join(appRoot(), 'dist', 'renderer', 'selection.html'));
+
+  screenshotSelectionWindow.once('ready-to-show', () => {
+    screenshotSelectionWindow?.show();
+    screenshotSelectionWindow?.focus();
+  });
+
+  screenshotSelectionWindow.webContents.on('did-fail-load', () => {
+    if (screenshotSelectionSession) {
+      finalizeScreenshotSelection({ error: 'Failed to open screenshot selection overlay' });
+    }
+  });
+
+  screenshotSelectionWindow.on('closed', () => {
+    screenshotSelectionWindow = null;
+
+    if (screenshotSelectionSession) {
+      const session = screenshotSelectionSession;
+      screenshotSelectionSession = null;
+      restoreCaptureWindows(session.restoreState);
+      session.resolve({ canceled: true });
+    }
+  });
+};
+
 const createWindow = () => {
   const icon = nativeImage.createFromPath(getIconPath());
 
@@ -167,9 +431,11 @@ const createTray = () => {
 
 const registerShortcuts = () => {
   globalShortcut.register('CommandOrControl+Shift+R', () => {
+    if (screenshotSelectionSession) return;
     mainWindow?.webContents.send('toggle-recording');
   });
   globalShortcut.register('CommandOrControl+Shift+P', () => {
+    if (screenshotSelectionSession) return;
     mainWindow?.webContents.send('toggle-pause');
   });
 };
@@ -225,6 +491,78 @@ ipcMain.handle('set-source', (_event, sourceId: string) => {
 ipcMain.handle('set-audio-mode', (_event, enabled: boolean) => {
   captureSystemAudio = enabled;
   console.log('[main] System audio capture:', captureSystemAudio);
+});
+
+// IPC: Capture screenshot PNG from the current display while app windows are hidden
+ipcMain.handle('capture-screenshot', async () => {
+  try {
+    const data = await captureCurrentDisplayScreenshot();
+    return { data };
+  } catch (err) {
+    console.error('[main] capture-screenshot error:', err);
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// IPC: Start external select-area screenshot overlay on the current display
+ipcMain.handle('start-screenshot-selection', async () => {
+  if (screenshotSelectionSession || screenshotSelectionWindow) {
+    return { error: 'Screenshot selection is already active' };
+  }
+
+  const restoreState = await hideCaptureWindows();
+  finalizeCaptureWindowHiding(restoreState);
+
+  try {
+    await delay(process.platform === 'linux' ? 180 : 80);
+    const capture = await captureCurrentDisplayImage();
+
+    return await new Promise<ScreenshotResult>((resolve) => {
+      screenshotSelectionSession = {
+        dataUrl: capture.dataUrl,
+        restoreState,
+        resolve,
+      };
+
+      createScreenshotSelectionWindow(capture.display);
+    });
+  } catch (err) {
+    restoreCaptureWindows(restoreState);
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// IPC: Get external select-area screenshot session data
+ipcMain.handle('get-screenshot-selection-data', async () => {
+  if (!screenshotSelectionSession) {
+    return { error: 'No screenshot selection session found' };
+  }
+
+  return { imageDataUrl: screenshotSelectionSession.dataUrl };
+});
+
+// IPC: Finish external select-area screenshot and save the cropped PNG
+ipcMain.handle('complete-screenshot-selection', async (_event, { filename, data }: { filename: string; data: ArrayBuffer }) => {
+  if (!screenshotSelectionSession) {
+    return { error: 'No screenshot selection session found' };
+  }
+
+  const result = saveScreenshotDirectly(filename, data);
+  return finalizeScreenshotSelection(result);
+});
+
+// IPC: Cancel external select-area screenshot overlay
+ipcMain.handle('cancel-screenshot-selection', async () => {
+  if (!screenshotSelectionSession) {
+    return { canceled: true };
+  }
+
+  return finalizeScreenshotSelection({ canceled: true });
+});
+
+// IPC: Save screenshot PNG to disk
+ipcMain.handle('save-screenshot', async (_event, { filename, data }: { filename: string; data: ArrayBuffer }) => {
+  return saveScreenshotToDisk(filename, data);
 });
 
 // IPC: Open a write stream for streaming chunks during recording
@@ -409,6 +747,7 @@ ipcMain.on('toolbar-sync', (_event, data: { timer: string; state: 'recording' | 
 
 // IPC: Toolbar buttons → relay to main window
 ipcMain.on('toolbar-action', (_event, action: 'pause' | 'stop') => {
+  if (screenshotSelectionSession) return;
   if (action === 'pause') {
     mainWindow?.webContents.send('toggle-pause');
   } else if (action === 'stop') {

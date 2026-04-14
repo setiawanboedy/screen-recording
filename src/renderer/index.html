@@ -196,6 +196,20 @@
 
     .btn-stop:hover:not(:disabled) { background: #5a6578; transform: scale(1.02); }
 
+    .btn-screenshot {
+      background: #0f3460;
+      color: white;
+    }
+
+    .btn-screenshot:hover:not(:disabled) { background: #17477f; transform: scale(1.02); }
+
+    .btn-select {
+      background: #533483;
+      color: white;
+    }
+
+    .btn-select:hover:not(:disabled) { background: #6742a4; transform: scale(1.02); }
+
     .shortcuts-hint {
       flex-shrink: 0;
       text-align: center;
@@ -402,6 +416,45 @@
 
     .conversion-overlay.visible { display: flex; }
 
+    .save-toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      width: min(420px, calc(100vw - 36px));
+      background: rgba(9, 12, 24, 0.94);
+      border: 1px solid rgba(83, 215, 105, 0.42);
+      border-radius: 14px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 1100;
+      transform: translateY(18px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    .save-toast.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .save-toast-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #53d769;
+    }
+
+    .save-toast-path {
+      font-size: 12px;
+      color: #e2e8f0;
+      line-height: 1.45;
+      word-break: break-all;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
     .conversion-card {
       background: #16213e;
       border: 1px solid #0f3460;
@@ -468,6 +521,7 @@
     }
 
     #progressPercent { font-weight: 700; color: #e94560; }
+
   </style>
 </head>
 <body>
@@ -485,7 +539,7 @@
         <line x1="8" y1="21" x2="16" y2="21"/>
         <line x1="12" y1="17" x2="12" y2="21"/>
       </svg>
-      <p>Select a screen source and start recording</p>
+      <p>Select a screen source to record, or take a screenshot anytime</p>
     </div>
   </div>
 
@@ -564,6 +618,8 @@
 
   <div class="controls">
     <button class="btn-record" id="startBtn">⏺ Start Recording</button>
+    <button class="btn-screenshot" id="screenshotBtn" disabled>📸 Screenshot</button>
+    <button class="btn-select" id="selectAreaBtn" disabled>✂ Select Area</button>
     <button class="btn-pause" id="pauseBtn" disabled>⏸ Pause</button>
     <button class="btn-stop" id="stopBtn" disabled>⏹ Stop</button>
   </div>
@@ -591,6 +647,11 @@
         <span id="progressTime">—</span>
       </div>
     </div>
+  </div>
+
+  <div id="saveToast" class="save-toast" aria-live="polite">
+    <div id="saveToastTitle" class="save-toast-title">Screenshot saved</div>
+    <div id="saveToastPath" class="save-toast-path"></div>
   </div>
 
   <script src="./index.js"></script>

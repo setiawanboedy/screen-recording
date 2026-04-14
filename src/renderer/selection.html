@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Select Screenshot Area</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      color: #f7fafc;
+      user-select: none;
+      cursor: crosshair;
+    }
+
+    body {
+      position: relative;
+    }
+
+    .stage {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: #000;
+    }
+
+    .stage img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: fill;
+      filter: brightness(0.84);
+      pointer-events: none;
+    }
+
+    .selection-box {
+      display: none;
+      position: absolute;
+      border: 2px solid #53d769;
+      background: rgba(83, 215, 105, 0.14);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+      pointer-events: none;
+    }
+
+    .hud {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: 420px;
+      max-width: calc(100vw - 32px);
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(9, 12, 24, 0.78);
+      border: 1px solid rgba(83, 52, 131, 0.6);
+      backdrop-filter: blur(14px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      cursor: default;
+    }
+
+    .hud-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .hud-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .hud-sub {
+      font-size: 12px;
+      color: #cbd5e0;
+    }
+
+    .hud-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-cancel {
+      background: rgba(74, 85, 104, 0.95);
+      color: #fff;
+    }
+
+    .btn-save {
+      background: rgba(83, 215, 105, 0.95);
+      color: #08110d;
+    }
+
+    .selection-stats {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(9, 12, 24, 0.72);
+      border: 1px solid rgba(15, 52, 96, 0.9);
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <img id="selectionImage" alt="Screenshot background">
+    <div class="selection-box" id="selectionBox"></div>
+  </div>
+
+  <div class="hud">
+    <div class="hud-copy">
+      <div class="hud-title">Select Screenshot Area</div>
+      <div class="hud-sub" id="hudSub">Drag anywhere on screen. Press Esc to cancel.</div>
+    </div>
+    <div class="hud-actions">
+      <button class="btn-cancel" id="cancelBtn">Cancel</button>
+      <button class="btn-save" id="saveBtn" disabled>Save Selection</button>
+    </div>
+  </div>
+
+  <div class="selection-stats" id="selectionStats">No area selected</div>
+
+  <script src="./selection.js"></script>
+</body>
+</html>

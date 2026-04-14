@@ -5,6 +5,8 @@ Electron desktop app untuk screen recording dengan audio mixing dan noise reduct
 ## Fitur
 
 - Rekam layar atau window tertentu
+- Screenshot PNG dari screen/window yang dipilih
+- Select-area screenshot dari frame yang dipilih
 - Mix audio: system audio (loopback) + microphone
 - Noise reduction 2-tier: browser native + AudioWorklet spectral gate
 - Output format: WebM atau MP4 (via ffmpeg)
@@ -38,6 +40,14 @@ bun run start
 ```
 
 Perintah ini menjalankan full build terlebih dahulu, lalu membuka Electron.
+
+### Screenshot
+
+Screenshot tidak lagi bergantung pada `Screen Source`.
+Saat tombol `Screenshot` ditekan, window utama dan floating toolbar disembunyikan sebentar, layar aktif di belakang app di-capture, lalu app ditampilkan kembali.
+File disimpan sebagai PNG melalui native save dialog.
+
+Untuk crop area tertentu, klik `Select Area`. App akan membuka fullscreen selection overlay di display aktif di luar window recording, sehingga Anda bisa drag area langsung di atas desktop yang sudah dibekukan. Saat klik `Save Selection`, hasil crop langsung disimpan sebagai PNG ke folder `Pictures/Screen Recorder` tanpa menampilkan save dialog.
 
 ### Build saja (tanpa launch)
 

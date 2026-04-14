@@ -1,22 +1,8 @@
+import type { CaptureResult, ElectronAPI, SaveResult } from './electron-api';
+
 declare global {
   interface Window {
-    electronAPI: {
-      getSources: () => Promise<Array<{ id: string; name: string; thumbnail: string }>>;
-      setSource: (sourceId: string) => Promise<void>;
-      setAudioMode: (captureSystemAudio: boolean) => Promise<void>;
-      initRecording: () => Promise<void>;
-      sendChunk: (buf: ArrayBuffer) => Promise<void>;
-      saveRecording: (filename: string, durationSeconds: number) => Promise<{ success?: boolean; filePath?: string; canceled?: boolean; warning?: string; error?: string }>;
-      cancelRecording: () => void;
-      setRecordingStatus: (status: string) => void;
-      onToggleRecording: (callback: () => void) => void;
-      onTogglePause: (callback: () => void) => void;
-      showFloatingToolbar: () => void;
-      hideFloatingToolbar: () => void;
-      syncToolbar: (timer: string, state: 'recording' | 'paused') => void;
-      onConversionStart: (cb: (opts?: { mode?: string }) => void) => void;
-      onConversionProgress: (cb: (data: { percent: number; currentSecs: number; totalSecs: number }) => void) => void;
-    };
+    electronAPI: ElectronAPI;
   }
 }
 
@@ -26,6 +12,8 @@ const placeholder = document.getElementById('placeholder') as HTMLDivElement;
 const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
 const pauseBtn = document.getElementById('pauseBtn') as HTMLButtonElement;
 const stopBtn = document.getElementById('stopBtn') as HTMLButtonElement;
+const screenshotBtn = document.getElementById('screenshotBtn') as HTMLButtonElement;
+const selectAreaBtn = document.getElementById('selectAreaBtn') as HTMLButtonElement;
 const sourceSelect = document.getElementById('sourceSelect') as HTMLSelectElement;
 const micSelect = document.getElementById('micSelect') as HTMLSelectElement;
 const formatSelect = document.getElementById('formatSelect') as HTMLSelectElement;
@@ -50,6 +38,9 @@ const progressPercent = document.getElementById('progressPercent') as HTMLSpanEl
 const progressTime = document.getElementById('progressTime') as HTMLSpanElement;
 const convTitle = document.getElementById('convTitle') as HTMLDivElement;
 const convSub = document.getElementById('convSub') as HTMLDivElement;
+const saveToast = document.getElementById('saveToast') as HTMLDivElement;
+const saveToastTitle = document.getElementById('saveToastTitle') as HTMLDivElement;
+const saveToastPath = document.getElementById('saveToastPath') as HTMLDivElement;
 
 // State
 let mediaRecorder: MediaRecorder | null = null;
@@ -58,8 +49,10 @@ let timerInterval: ReturnType<typeof setInterval> | null = null;
 let elapsedSeconds = 0;
 let isPaused = false;
 let isRecording = false;
+let isTakingScreenshot = false;
 let activeStreams: MediaStream[] = [];
 let activeAudioContext: AudioContext | null = null;
+let saveToastTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Mic test state
 let micTestStream: MediaStream | null = null;
@@ -114,6 +107,22 @@ async function hideConversionOverlay() {
   convSub.textContent = '✓ Done!';
   await new Promise(r => setTimeout(r, 700));
   conversionOverlay.classList.remove('visible');
+}
+
+function showSaveToast(title: string, filePath: string) {
+  saveToastTitle.textContent = title;
+  saveToastPath.textContent = filePath;
+  saveToast.title = filePath;
+  saveToast.classList.add('visible');
+
+  if (saveToastTimeout) {
+    clearTimeout(saveToastTimeout);
+  }
+
+  saveToastTimeout = setTimeout(() => {
+    saveToast.classList.remove('visible');
+    saveToastTimeout = null;
+  }, 5000);
 }
 
 // Listen to conversion events from main process
@@ -460,6 +469,78 @@ function cleanupStreams() {
   placeholder.style.display = 'flex';
 }
 
+async function captureScreenshotFrame(): Promise<ArrayBuffer> {
+  const result = await window.electronAPI.captureScreenshot();
+  if (result.error) {
+    throw new Error(result.error);
+  }
+
+  if (!result.data) {
+    throw new Error('No screenshot data returned');
+  }
+
+  return result.data;
+}
+
+async function takeScreenshot() {
+  isTakingScreenshot = true;
+  screenshotBtn.textContent = 'Saving...';
+  updateButtons(isRecording ? 'recording' : 'idle');
+
+  try {
+    const pngBuffer = await captureScreenshotFrame();
+
+    const result = await window.electronAPI.saveScreenshot(
+      `screenshot-${Date.now()}.png`,
+      pngBuffer
+    );
+
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    if (result.filePath) {
+      showSaveToast('Screenshot saved', result.filePath);
+      screenshotBtn.textContent = 'Saved';
+      await new Promise(resolve => setTimeout(resolve, 900));
+    }
+  } catch (err) {
+    console.error('[renderer] takeScreenshot error:', err);
+    alert(`Screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    isTakingScreenshot = false;
+    screenshotBtn.textContent = 'Screenshot';
+    updateButtons(isRecording ? 'recording' : 'idle');
+  }
+}
+
+async function takeSelectedScreenshot() {
+  isTakingScreenshot = true;
+  selectAreaBtn.textContent = 'Selecting...';
+  updateButtons(isRecording ? 'recording' : 'idle');
+
+  try {
+    const result = await window.electronAPI.startScreenshotSelection();
+
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    if (result.filePath) {
+      showSaveToast('Selected area saved', result.filePath);
+      selectAreaBtn.textContent = 'Saved';
+      await new Promise(resolve => setTimeout(resolve, 900));
+    }
+  } catch (err) {
+    console.error('[renderer] takeSelectedScreenshot error:', err);
+    alert(`Select screenshot failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    isTakingScreenshot = false;
+    selectAreaBtn.textContent = 'Select Area';
+    updateButtons(isRecording ? 'recording' : 'idle');
+  }
+}
+
 // Start recording
 async function startRecording() {
   const sourceId = sourceSelect.value;
@@ -636,15 +717,18 @@ function togglePause() {
 
 // UI state
 function updateButtons(state: 'idle' | 'recording') {
-  startBtn.disabled = state === 'recording';
-  pauseBtn.disabled = state === 'idle';
-  stopBtn.disabled = state === 'idle';
-  sourceSelect.disabled = state === 'recording';
-  micSelect.disabled = state === 'recording';
-  formatSelect.disabled = state === 'recording';
-  noiseReductionToggle.disabled = state === 'recording' || !systemAudioToggle.checked;
-  systemAudioToggle.disabled = state === 'recording';
-  refreshMicBtn.disabled = state === 'recording';
+  const controlsLocked = isTakingScreenshot;
+  startBtn.disabled = state === 'recording' || controlsLocked;
+  pauseBtn.disabled = state === 'idle' || controlsLocked;
+  stopBtn.disabled = state === 'idle' || controlsLocked;
+  screenshotBtn.disabled = controlsLocked;
+  selectAreaBtn.disabled = controlsLocked;
+  sourceSelect.disabled = state === 'recording' || controlsLocked;
+  micSelect.disabled = state === 'recording' || controlsLocked;
+  formatSelect.disabled = state === 'recording' || controlsLocked;
+  noiseReductionToggle.disabled = state === 'recording' || controlsLocked || !systemAudioToggle.checked;
+  systemAudioToggle.disabled = state === 'recording' || controlsLocked;
+  refreshMicBtn.disabled = state === 'recording' || controlsLocked;
   console.log('[renderer] Buttons updated:', state, '| pause disabled:', pauseBtn.disabled, '| stop disabled:', stopBtn.disabled);
 }
 
@@ -652,13 +736,22 @@ function updateButtons(state: 'idle' | 'recording') {
 startBtn.onclick = startRecording;
 stopBtn.onclick = stopRecording;
 pauseBtn.onclick = togglePause;
+screenshotBtn.onclick = takeScreenshot;
+selectAreaBtn.onclick = takeSelectedScreenshot;
+sourceSelect.addEventListener('change', () => {
+  updateButtons(isRecording ? 'recording' : 'idle');
+});
 
 // Global hotkeys from main process
 window.electronAPI.onToggleRecording(() => {
+  if (isTakingScreenshot) return;
   if (isRecording) stopRecording();
   else startRecording();
 });
 
 window.electronAPI.onTogglePause(() => {
+  if (isTakingScreenshot) return;
   togglePause();
 });
+
+updateButtons('idle');
