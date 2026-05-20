@@ -1,17 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getSources: () => ipcRenderer.invoke('get-sources'),
   setSource: (sourceId: string) => ipcRenderer.invoke('set-source', sourceId),
   setAudioMode: (captureSystemAudio: boolean) => ipcRenderer.invoke('set-audio-mode', captureSystemAudio),
-  captureScreenshot: () => ipcRenderer.invoke('capture-screenshot'),
-  startScreenshotSelection: () => ipcRenderer.invoke('start-screenshot-selection'),
-  getScreenshotSelectionData: () => ipcRenderer.invoke('get-screenshot-selection-data'),
-  completeScreenshotSelection: (filename: string, data: ArrayBuffer) =>
-    ipcRenderer.invoke('complete-screenshot-selection', { filename, data }),
-  cancelScreenshotSelection: () => ipcRenderer.invoke('cancel-screenshot-selection'),
-  saveScreenshot: (filename: string, data: ArrayBuffer) =>
-    ipcRenderer.invoke('save-screenshot', { filename, data }),
   // Streaming recording
   initRecording: () => ipcRenderer.invoke('recording-init'),
   sendChunk: (buf: ArrayBuffer) => ipcRenderer.invoke('recording-chunk', buf),
